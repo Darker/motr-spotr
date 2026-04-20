@@ -1,0 +1,82 @@
+Configuration	nucleo_settings
+STM32CubeMX 	6.17.0
+Date	04/20/2026
+MCU	STM32F446RETx
+
+
+
+PERIPHERALS	MODES	FUNCTIONS	PINS
+ADC1	IN14	ADC1_IN14	PC4
+SYS	SysTick	SYS_VS_Systick	VP_SYS_VS_Systick
+TIM2	Internal Clock	TIM2_VS_ClockSourceINT	VP_TIM2_VS_ClockSourceINT
+USB_OTG_FS	Device_Only	USB_OTG_FS_DM	PA11
+USB_OTG_FS	Device_Only	USB_OTG_FS_DP	PA12
+
+
+
+Pin Nb	PINs	FUNCTIONs	LABELs
+2	PC13	GPIO_EXTI13	B1 [Blue PushButton]
+3	PC14-OSC32_IN*	RCC_OSC32_IN	
+4	PC15-OSC32_OUT*	RCC_OSC32_OUT	
+5	PH0-OSC_IN*	RCC_OSC_IN	
+6	PH1-OSC_OUT*	RCC_OSC_OUT	
+16	PA2*	USART2_TX	USART_TX
+17	PA3*	USART2_RX	USART_RX
+21	PA5	GPIO_Output	LD2 [Green Led]
+24	PC4	ADC1_IN14	
+44	PA11	USB_OTG_FS_DM	
+45	PA12	USB_OTG_FS_DP	
+46	PA13*	SYS_JTMS-SWDIO	TMS
+49	PA14*	SYS_JTCK-SWCLK	TCK
+55	PB3*	SYS_JTDO-SWO	SWO
+PERIPHERALS	MODES	FUNCTIONS	PINS
+ADC1	IN14	ADC1_IN14	PC4
+SYS	SysTick	SYS_VS_Systick	VP_SYS_VS_Systick
+TIM2	Internal Clock	TIM2_VS_ClockSourceINT	VP_TIM2_VS_ClockSourceINT
+USB_OTG_FS	Device_Only	USB_OTG_FS_DM	PA11
+USB_OTG_FS	Device_Only	USB_OTG_FS_DP	PA12
+
+
+
+Pin Nb	PINs	FUNCTIONs	LABELs
+2	PC13	GPIO_EXTI13	B1 [Blue PushButton]
+3	PC14-OSC32_IN*	RCC_OSC32_IN	
+4	PC15-OSC32_OUT*	RCC_OSC32_OUT	
+5	PH0-OSC_IN*	RCC_OSC_IN	
+6	PH1-OSC_OUT*	RCC_OSC_OUT	
+16	PA2*	USART2_TX	USART_TX
+17	PA3*	USART2_RX	USART_RX
+21	PA5	GPIO_Output	LD2 [Green Led]
+24	PC4	ADC1_IN14	
+44	PA11	USB_OTG_FS_DM	
+45	PA12	USB_OTG_FS_DP	
+46	PA13*	SYS_JTMS-SWDIO	TMS
+49	PA14*	SYS_JTCK-SWCLK	TCK
+55	PB3*	SYS_JTDO-SWO	SWO
+
+
+
+SOFTWARE PROJECT
+
+Project Settings : 
+Project Name : nucleo_settings
+Project Folder : E:\JAKUB\programming\motr-spotr\stm32cubemx\nucleo_settings
+Toolchain / IDE : EWARM V8.50
+Firmware Package Name and Version : STM32Cube FW_F4 V1.28.3
+
+
+Code Generation Settings : 
+STM32Cube MCU packages and embedded software packs : Copy all used libraries into the project folder
+Generate peripheral initialization as a pair of '.c/.h' files per peripheral : No
+Backup previously generated files when re-generating : No
+Delete previously generated files when not re-generated : Yes
+Set all free pins as analog (to optimize the power consumption) : No
+
+
+Toolchains Settings : 
+Compiler Optimizations : 
+
+
+
+
+
