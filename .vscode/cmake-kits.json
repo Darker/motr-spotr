@@ -1,0 +1,21 @@
+[
+    {
+        "name": "AVR Toolchain",
+        "toolchainFile": "${workspaceFolder}/toolchain-avr.cmake"
+    },
+    {
+        "name": "STM32 Toolchain",
+        "toolchainFile": "${workspaceFolder}/stm32-arm-toolchain.cmake"
+    },
+    {
+        "name": "STM32 CUBE MX Toolchain",
+        "toolchainFile": "${workspaceFolder}/nucleo_adc/stm32cubemx/nucleo_settings/cmake/gcc-arm-none-eabi.cmake"
+    },
+    {
+        "name": "Host Compiler",
+        "compilers": {
+            "C": "gcc",
+            "CXX": "g++"
+        }
+    }
+]
