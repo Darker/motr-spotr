@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "nucleo_main/generated/generated_user_steps.h"
 
 /* USER CODE END Includes */
 
@@ -73,6 +74,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+    main_pre_setup(&hadc1, &hdma_adc1, &htim2);  // auto-inserted
 
   /* USER CODE END 1 */
 
@@ -99,17 +101,19 @@ int main(void)
   MX_TIM2_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+    main_post_setup(&hadc1, &hdma_adc1, &htim2);  // auto-inserted
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+    while(1) user_loop_main(&hadc1, &hdma_adc1, &htim2);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+    // while loop reformated
+
   /* USER CODE END 3 */
 }
 
@@ -168,12 +172,14 @@ static void MX_ADC1_Init(void)
 {
 
   /* USER CODE BEGIN ADC1_Init 0 */
+    ADC1_Init_user_0();  // auto-inserted
 
   /* USER CODE END ADC1_Init 0 */
 
   ADC_ChannelConfTypeDef sConfig = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
+    ADC1_Init_user_1();  // auto-inserted
 
   /* USER CODE END ADC1_Init 1 */
 
@@ -206,6 +212,7 @@ static void MX_ADC1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC1_Init 2 */
+    ADC1_Init_user_2();  // auto-inserted
 
   /* USER CODE END ADC1_Init 2 */
 
@@ -220,6 +227,7 @@ static void MX_TIM2_Init(void)
 {
 
   /* USER CODE BEGIN TIM2_Init 0 */
+    TIM2_Init_user_0();  // auto-inserted
 
   /* USER CODE END TIM2_Init 0 */
 
@@ -227,6 +235,7 @@ static void MX_TIM2_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
+    TIM2_Init_user_1();  // auto-inserted
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
@@ -251,6 +260,7 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
+    TIM2_Init_user_2();  // auto-inserted
 
   /* USER CODE END TIM2_Init 2 */
 

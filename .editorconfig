@@ -1,0 +1,15 @@
+root = true
+
+# Default for everything else
+[*]
+indent_style = space
+indent_size = 4
+
+# C / C++
+[*.{c,cpp,h,hpp}]
+indent_style = space
+indent_size = 4
+
+# VSCode C/C++ extension formatting
+# Allman braces (next line)
+c_cpp.clang_format_fallbackStyle = "{ BasedOnStyle: LLVM, IndentWidth: 4, BreakBeforeBraces: Allman }"

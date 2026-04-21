@@ -1,2 +1,3 @@
-build
+/build
 nucleo_adc/STM32F446XX_FLASH.ld
+**/nucleo_main/generated/

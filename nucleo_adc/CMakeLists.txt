@@ -39,13 +39,16 @@ if(NOT COMPILER_DEFINES_ARM)
 
     target_compile_features(${PRODUCT_NAME} PRIVATE cxx_std_20)
     target_compile_definitions(${PRODUCT_NAME} PRIVATE HOST_BUILD=1)
+
+    add_subdirectory("reader_lib")
+    add_subdirectory("adc_reader")
 else()
     # Embedded build (STM32F446RE)
     # -------------------------------------------------------------
     message(STATUS "Building for STM32F446RE")
     add_subdirectory("stm32cubemx/nucleo_settings")
 
-    # target_compile_definitions(${PRODUCT_NAME} PRIVATE STM32F446xx)
+    target_include_directories(nucleo_settings PRIVATE nucleo_main/include)
     # target_compile_options(${PRODUCT_NAME} PRIVATE
     #     -mcpu=cortex-m4
     #     -mthumb

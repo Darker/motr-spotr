@@ -1,4 +1,7 @@
 {
     "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}",
-    "cmake.sourceDirectory": "E:/JAKUB/programming/motr-spotr/nucleo_adc"
+    "cmake.sourceDirectory": "E:/JAKUB/programming/motr-spotr/nucleo_adc",
+    "clangd.arguments": [
+        "--compile-commands-dir=${command:cmake.buildDirectory}"
+    ],
 }
