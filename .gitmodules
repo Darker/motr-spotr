@@ -1,0 +1,9 @@
+[submodule "nucleo_adc/tpc/implot/implot"]
+	path = nucleo_adc/tpc/implot/implot
+	url = git@github.com:epezent/implot.git
+[submodule "nucleo_adc/tpc/imgui/imgui"]
+	path = nucleo_adc/tpc/imgui/imgui
+	url = git@github.com:ocornut/imgui.git
+[submodule "nucleo_adc/tpc/glfw/glfw"]
+	path = nucleo_adc/tpc/glfw/glfw
+	url = git@github.com:glfw/glfw.git
