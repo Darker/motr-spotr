@@ -1,0 +1,3 @@
+
+
+struct USBD_HandleTypeDef {};

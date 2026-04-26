@@ -325,6 +325,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
+    user_gpio_init();
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
