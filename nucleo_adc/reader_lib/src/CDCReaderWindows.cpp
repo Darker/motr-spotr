@@ -1,6 +1,6 @@
 #include "CDCReaderWindows.h"
 
-SerialStreamBuf::SerialStreamBuf(const char *portName)
+CDCReaderWindows::CDCReaderWindows(const char *portName)
 {
     handle = CreateFileA(portName, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -13,14 +13,14 @@ SerialStreamBuf::SerialStreamBuf(const char *portName)
     setupPort();
 }
 
-SerialStreamBuf::~SerialStreamBuf()
+CDCReaderWindows::~CDCReaderWindows()
 {
     if (handle != INVALID_HANDLE_VALUE)
     {
         CloseHandle(handle);
     }
 }
-size_t SerialStreamBuf::readBytes(char *dst, size_t len)
+size_t CDCReaderWindows::readBytes(uint8_t* dst, size_t len)
 {
     DWORD read = 0;
 
@@ -31,7 +31,7 @@ size_t SerialStreamBuf::readBytes(char *dst, size_t len)
 
     return static_cast<size_t>(read);
 }
-size_t SerialStreamBuf::writeBytes(const char *src, size_t len)
+size_t CDCReaderWindows::writeBytes(const uint8_t* src, size_t len)
 {
     DWORD written = 0;
 
@@ -43,7 +43,7 @@ size_t SerialStreamBuf::writeBytes(const char *src, size_t len)
     return static_cast<size_t>(written);
 }
 
-int SerialStreamBuf::overflow(int ch)
+int CDCReaderWindows::overflow(int ch)
 {
     if (ch == EOF)
         return 0;
@@ -53,7 +53,7 @@ int SerialStreamBuf::overflow(int ch)
     return ch;
 }
 
-int SerialStreamBuf::underflow()
+int CDCReaderWindows::underflow()
 {
     DWORD read;
     char c;
@@ -67,7 +67,7 @@ int SerialStreamBuf::underflow()
     return static_cast<unsigned char>(buffer);
 }
 
-void SerialStreamBuf::setupPort()
+void CDCReaderWindows::setupPort()
 {
     DCB dcb{};
     dcb.DCBlength = sizeof(DCB);

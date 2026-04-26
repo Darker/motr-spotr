@@ -2,16 +2,16 @@
 #include <streambuf>
 #include <windows.h>
 
-class SerialStreamBuf : public std::streambuf
+class CDCReaderWindows : public std::streambuf
 {
   public:
-    SerialStreamBuf(const char *portName);
+    CDCReaderWindows(const char *portName);
 
-    ~SerialStreamBuf() override;
+    ~CDCReaderWindows() override;
 
-    size_t readBytes(char *dst, size_t len);
+    size_t readBytes(uint8_t* dst, size_t len);
 
-    size_t writeBytes(const char *src, size_t len);
+    size_t writeBytes(const uint8_t* rc, size_t len);
 
   protected:
     // Write one character

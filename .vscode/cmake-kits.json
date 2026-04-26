@@ -17,5 +17,14 @@
             "C": "gcc",
             "CXX": "g++"
         }
+    },
+    {
+        "name": "MSVC 2022 Release - amd64 Ninja",
+        "visualStudio": "c233e484",
+        "visualStudioArchitecture": "x64",
+        "isTrusted": true,
+        "preferredGenerator": {
+            "name": "Ninja"
+        }
     }
 ]

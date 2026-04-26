@@ -2,12 +2,12 @@ cmake_minimum_required(VERSION 3.20)
 project(MotrSpotr C CXX ASM)
 
 set(PRODUCT_NAME motr_spotr)
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 # -------------------------------------------------------------
 # Detect whether we are using ARM embedded GCC
 # -------------------------------------------------------------
 include(CheckCXXSourceCompiles)
-
+enable_language(C ASM CXX)
 check_cxx_source_compiles("
     #ifndef __arm__
     #error Not ARM
@@ -26,9 +26,11 @@ add_custom_target(copy_linker_script
         ${CMAKE_SOURCE_DIR}/STM32F446XX_FLASH.ld
     COMMENT "Copying linker script to project root"
 )
-
+add_subdirectory("nucleo_shared")
+add_subdirectory("nucleo_mock")
 add_subdirectory("nucleo_main")
-
+add_subdirectory("tpc/imgui")
+add_subdirectory("tpc/implot")
 
 
 # -------------------------------------------------------------
@@ -36,19 +38,36 @@ add_subdirectory("nucleo_main")
 # -------------------------------------------------------------
 if(NOT COMPILER_DEFINES_ARM)
     message(STATUS "Building for host platform")
-
-    target_compile_features(${PRODUCT_NAME} PRIVATE cxx_std_20)
-    target_compile_definitions(${PRODUCT_NAME} PRIVATE HOST_BUILD=1)
+    add_subdirectory("tpc/glfw/glfw")
 
     add_subdirectory("reader_lib")
     add_subdirectory("adc_reader")
+    target_compile_features(adc_reader PRIVATE cxx_std_20)
+    target_compile_definitions(adc_reader PRIVATE HOST_BUILD=1)
 else()
     # Embedded build (STM32F446RE)
     # -------------------------------------------------------------
     message(STATUS "Building for STM32F446RE")
     add_subdirectory("stm32cubemx/nucleo_settings")
+    # This is here because nucleo_settings main.c referencers generated headers
+    # from the nucleo main
+    target_include_directories(nucleo_settings PRIVATE 
+        nucleo_main/include 
+        stm32cubemx/nucleo_settings/Core
+        stm32cubemx/nucleo_settings/Drivers/STM32F4xx_HAL_Driver/Inc
+    )
 
-    target_include_directories(nucleo_settings PRIVATE nucleo_main/include)
+    # target_sources(nucleo_settings PRIVATE 
+    #     stm32cubemx/nucleo_settings/Core/Src/usb_events.c
+    # )
+
+    target_link_libraries(nucleo_settings nucleo_main)
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/stm32cubemx/nucleo_settings/startup_stm32f446xx.s
+        PROPERTIES LANGUAGE ASM
+    )
+
+
     # target_compile_options(${PRODUCT_NAME} PRIVATE
     #     -mcpu=cortex-m4
     #     -mthumb
@@ -86,9 +105,9 @@ else()
     # -------------------------------------------------------------
 
     add_custom_target(build_binaries ALL
-        COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${PRODUCT_NAME}> ${CMAKE_BINARY_DIR}/motr_spotr.bin
-        COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:${PRODUCT_NAME}> ${CMAKE_BINARY_DIR}/motr_spotr.hex
-        DEPENDS ${PRODUCT_NAME}
+        COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:nucleo_settings> ${CMAKE_BINARY_DIR}/motr_spotr.bin
+        COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:nucleo_settings> ${CMAKE_BINARY_DIR}/motr_spotr.hex
+        DEPENDS nucleo_settings
     )
 
     # Validate
@@ -107,7 +126,7 @@ else()
         COMMAND ${OPENOCD_BIN}
             -f ${OPENOCD_SCRIPTS}/interface/stlink.cfg
             -f ${OPENOCD_SCRIPTS}/target/stm32f4x.cfg
-            -c "program ${PRODUCT_NAME}.bin verify reset exit 0x08000000"
+            -c "program motr_spotr.bin verify reset exit 0x08000000"
         DEPENDS build_binaries
         COMMENT "Flashing STM32F446RE via OpenOCD"
     )
