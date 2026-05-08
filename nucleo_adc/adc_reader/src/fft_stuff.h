@@ -1,4 +1,5 @@
 #pragma once
+#include <complex>
 #include <vector>
 
 namespace hertz {
@@ -48,6 +49,21 @@ struct FakeTone
 std::vector<double> computeSpectrum(const std::vector<double> &samples,
                                     double samplingFreq, double fmin,
                                     double fmax, int Nout);
+
+
+void computeSpectrumFasterInternal(const std::vector<double> &samples,
+                                    std::vector<std::complex<double>>& fftReusableBuffer,
+                                    double samplingFreq, double fmin,
+                                    double fmax, double* vOut, size_t nOut);
+
+template <size_t VOutSize>                                    
+void computeSpectrumFaster(const std::vector<double> &samples,
+                                    std::vector<std::complex<double>>& fftReusableBuffer,
+                                    double samplingFreq, double fmin,
+                                    double fmax, std::array<double, VOutSize>& data)
+{
+    computeSpectrumFasterInternal(samples, fftReusableBuffer, samplingFreq, fmin, fmax, data.data(), VOutSize);
+}
 
 void generateMockSignal(std::vector<double> &out, double fs, const std::vector<FakeTone> tones);
 

@@ -1,4 +1,5 @@
 #include <nucleo_shared/adc_stream_constants.h>
+#include <nucleo_shared/SimpleQueue.h>
 #include <Inc/main.h>
 
 #include <nucleo_main/generated/generated_user_steps.h>
@@ -33,52 +34,96 @@ void pack12to3(const uint16_t *in, size_t count, uint8_t *out)
         out[o+1] = (uint8_t)((a >> 8) | ((b & 0x0F) << 4)); // A[11:8] + B[3:0]
         out[o+2] = (uint8_t)(b >> 4);                       // B[11:4]
 
-        // if(o > 1)
-        // {
-        //     // erase accidental magic occurence
-        //     for(uint8_t i_off = 0; ++i_off; i_off < 4)
-        //     {
-        //         size_t cur = o + i_off - 1;
-        //         size_t prev = cur - 1;
-        //         if(out[prev] == MAGIC_END[0] && out[cur] == MAGIC_END[1]) {
-
-        //         }
-        //     }
-        // }
-        // else if(o == 0)
-        // {
-        //     if(out[0] == MAGIC_END[0] && out[1] == MAGIC_END[1])
-        //     {
-
-        //     }
-        // }
-
 
         o += 3;
     }
 }
 
-static uint8_t usb_buffer[USB_BUFFER_LEN];
-
-bool sendBufferToUsb(const uint16_t* data, size_t dataLen, bool mock = false)
+static inline bool usb_is_busy(void)
 {
-    memcpy(usb_buffer, MAGIC_BEGIN, sizeof(MAGIC_BEGIN));
+    USBD_CDC_HandleTypeDef* hcdc =
+        (USBD_CDC_HandleTypeDef*) hUsbDeviceFS.pClassData;
+
+    return (hcdc->TxState != 0);
+}
+
+constexpr size_t USB_QUEUE_SIZE = 5;
+// static uint8_t usb_buffer[USB_QUEUE_SIZE][USB_BUFFER_LEN];
+// volatile size_t curBuferPos = 0;
+
+enum class UsbState
+{
+    PENDING,
+    SENDING,
+    SENT
+};
+struct UsbChunk
+{
+    uint8_t data[USB_BUFFER_LEN];
+    UsbState state;
+};
+
+static SimpleQueue<UsbChunk, USB_QUEUE_SIZE> usbQueue;
+
+static void writeToQueue(const uint16_t* data, size_t dataLen, uint8_t* curBuffer)
+{
+    memcpy(curBuffer, MAGIC_BEGIN, sizeof(MAGIC_BEGIN));
     //constexpr const uint32_t data_len = ADC_PACKED_CHUNK_LEN + sizeof(MAGIC_END);
     // for now, I'll just write zeros and rely on magic only
-    usb_buffer[HEADER_OFFSET_DATA_LEN+0] = 0;
-    usb_buffer[HEADER_OFFSET_DATA_LEN+1] = 0;
-    usb_buffer[HEADER_OFFSET_DATA_LEN+2] = 0;
-    usb_buffer[HEADER_OFFSET_DATA_LEN+3] = 0;
+    curBuffer[HEADER_OFFSET_DATA_LEN+0] = 0;
+    curBuffer[HEADER_OFFSET_DATA_LEN+1] = 0;
+    curBuffer[HEADER_OFFSET_DATA_LEN+2] = 0;
+    curBuffer[HEADER_OFFSET_DATA_LEN+3] = 0;
 
-    pack12to3(data, dataLen, usb_buffer + HEADER_OFFSET_DATA);
-    memcpy(usb_buffer + HEADER_OFFSET_MAGIC_END, MAGIC_END, sizeof(MAGIC_END));
+    pack12to3(data, dataLen, curBuffer + HEADER_OFFSET_DATA);
+    memcpy(curBuffer + HEADER_OFFSET_MAGIC_END, MAGIC_END, sizeof(MAGIC_END));
 
-    size_t total_len = HEADER_OFFSET_MAGIC_END + sizeof(MAGIC_END);
+    // size_t total_len = HEADER_OFFSET_MAGIC_END + sizeof(MAGIC_END);
+}
 
-    // *** SEND ***
-    uint8_t result = CDC_Transmit_FS(usb_buffer, total_len);
+static bool pushBufferToQueue(const uint16_t* data, size_t dataLen, bool mock = false)
+{
+    if(usbQueue.isFull())
+    {
+        return false;
+    }
 
-    return (result == USBD_OK);
+    UsbChunk* chunk = usbQueue.pushNext();
+    chunk->state = UsbState::PENDING;
+    writeToQueue(data, dataLen, chunk->data);
+    return true;
+    // // *** SEND ***
+    // uint8_t result = CDC_Transmit_FS(curBuffer, total_len);
+
+    // return (result == USBD_OK);
+}
+
+static void sendFromQueue()
+{
+    if(usbQueue.size() == 0)
+    {
+        return;
+    }
+    if(usbQueue.size() == 1 && usbQueue.at(0).state == UsbState::SENDING)
+    {
+        if(!usb_is_busy())
+        {
+            usbQueue.popOldest();
+        }
+        return;
+    }
+    if(!usb_is_busy())
+    {
+        if(usbQueue.at(0).state == UsbState::SENDING)
+        {
+            usbQueue.popOldest();
+        }
+        uint8_t result = CDC_Transmit_FS(usbQueue.at(0).data, USB_BUFFER_LEN);
+        if(result == USBD_OK)
+        {
+            usbQueue.at(0).state = UsbState::SENDING;
+        }
+    }
 }
 
 extern "C"
@@ -212,7 +257,7 @@ extern "C"
                 halves_read += 1;
                 if(usb_connected)
                 {
-                    sendBufferToUsb(adc_buffer, ADC_BUFFER_HALF_SIZE_SAMPLES);
+                    pushBufferToQueue(adc_buffer, ADC_BUFFER_HALF_SIZE_SAMPLES);
                 }
             }
             if (adc_full_ready)
@@ -221,9 +266,13 @@ extern "C"
                 fulls_read += 1;
                 if(usb_connected)
                 {
-                    sendBufferToUsb(adc_buffer + ADC_BUFFER_HALF_SIZE_SAMPLES, ADC_BUFFER_HALF_SIZE_SAMPLES);
+                    pushBufferToQueue(adc_buffer + ADC_BUFFER_HALF_SIZE_SAMPLES, ADC_BUFFER_HALF_SIZE_SAMPLES);
                 }
             }
+            sendFromQueue();
+
+            //__WFI();
+            //__WFE();
         }
     }
 

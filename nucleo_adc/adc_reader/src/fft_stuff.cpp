@@ -104,6 +104,74 @@ std::vector<double> computeSpectrum(const std::vector<double> &samples,
     return out;
 }
 
+
+// -----------------------------
+// High-quality spectrum extractor
+// -----------------------------
+void computeSpectrumFasterInternal(const std::vector<double> &samples,
+                                    std::vector<std::complex<double>>& fftReusableBuffer,
+                                    double samplingFreq, double fmin,
+                                    double fmax, double* vOut, size_t nOut)
+{
+    // 1. Determine FFT size (next power of two)
+    size_t N = samples.size();
+    size_t Nfft = 1;
+    while (Nfft < N)
+        Nfft <<= 1;
+
+    // 2. Copy samples into complex buffer (zero-padded)
+    fftReusableBuffer.resize(Nfft);
+    for (size_t i = 0; i < Nfft; i++)
+    {
+        if(i<N)
+        {
+            fftReusableBuffer[i] = std::complex<double>(samples[i], 0.0);
+        }
+        else {
+            fftReusableBuffer[i] = std::complex<double>(0.0, 0.0);
+        }
+    }
+        
+
+    // 3. Apply a Hann window (quality!)
+    for (size_t i = 0; i < N; i++)
+    {
+        double w = 0.5 * (1.0 - std::cos(2.0 * MATH_PI * i / (N - 1)));
+        fftReusableBuffer[i] *= w;
+    }
+
+    // 4. FFT
+    fft(fftReusableBuffer);
+
+    // 5. Magnitude spectrum (only positive freqs)
+    size_t Nh = Nfft / 2;
+    std::vector<double> mag(Nh);
+    for (size_t i = 0; i < Nh; i++)
+        mag[i] = std::abs(fftReusableBuffer[i]);
+
+    // 6. Output bucket mapping
+    memset(vOut, 0, nOut*sizeof(double));
+
+    double df = samplingFreq / Nfft; // FFT bin spacing
+
+    for (size_t i = 0; i < nOut; i++)
+    {
+        double f = fmin + (fmax - fmin) * (double(i) / (nOut - 1));
+        double bin = f / df;
+
+        size_t i0 = std::floor(bin);
+        size_t i1 = std::min(i0 + 1, Nh - 1);
+        double t = bin - i0;
+        if (bin >= Nh - 1)
+        {
+            vOut[i] = mag[i1];
+            continue;
+        }
+
+        vOut[i] = (1.0 - t) * mag[i0] + t * mag[i1];
+    }
+}
+
 void generateMockSignal(std::vector<double> &out, double fs,
                         const std::vector<FakeTone> tones)
 {

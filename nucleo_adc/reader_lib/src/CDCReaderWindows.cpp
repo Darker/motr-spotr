@@ -31,6 +31,26 @@ size_t CDCReaderWindows::readBytes(uint8_t* dst, size_t len)
 
     return static_cast<size_t>(read);
 }
+
+bool CDCReaderWindows::readBytesExact(uint8_t* dst, size_t len)
+{
+    size_t total = 0;
+
+    while (total < len)
+    {
+        DWORD read = 0;
+        if (!ReadFile(handle, dst + total, (DWORD)(len - total), &read, NULL))
+            return 0;
+
+        if (read == 0)
+            continue; // timeout, try again
+
+        total += read;
+    }
+
+    return total;
+}
+
 size_t CDCReaderWindows::writeBytes(const uint8_t* src, size_t len)
 {
     DWORD written = 0;

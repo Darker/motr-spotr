@@ -18,22 +18,25 @@
 #include <GLFW/glfw3.h>
 
 #include "fft_stuff.h"
+#include "FixedCirdularQueue.h"
 
 using namespace hertz;
 
 constexpr size_t FFT_SIZE = 4096;
-constexpr size_t FFT_LINES = 256;
+constexpr size_t FFT_LINES = 800;
 constexpr Hz FREQ_SAMPLE = 48_kHz;
-constexpr Hz FREQ_FFT_MAX = 10_kHz;
+constexpr Hz FREQ_FFT_MIN = 9_kHz;
+constexpr Hz FREQ_FFT_MAX = 35_kHz;
+constexpr size_t FFT_BATCH_SIZE = 1<<14;
 std::mutex lockFFTData;
 
 std::condition_variable cvNewFFTData;
+std::vector<std::array<double, FFT_SIZE>> g_plotData;
 
-
-
-std::vector<double> g_plotData;
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_newData{false};
+
+FixedCircularQueue<uint8_t[ADC_PACKED_CHUNK_LEN], 10> packedQueue;
 
 GLFWwindow* CreateGuiWindow(int width, int height, const char* title)
 {
@@ -98,24 +101,38 @@ void guiThreadFunc()
         row.fill(0.0);
     }
     size_t fftRowIndex = 0;
+    bool rowsChanged = false;
+
+    const auto predNewDataCv = [window]() 
+    {
+        return g_newData.load() || glfwWindowShouldClose(window) || !g_running.load();
+    };
+
 
     while (!glfwWindowShouldClose(window) && g_running.load())
     {
         {
             std::unique_lock<std::mutex> lock(lockFFTData);
             // Wait up to 5 ms for new FFT data
-            cvNewFFTData.wait_for(lock, std::chrono::milliseconds(5));
+            cvNewFFTData.wait_for(lock, std::chrono::milliseconds(2), predNewDataCv);
 
-            if(g_newData.load())
+            if(g_plotData.size() > 0)
             {
-                auto& row = fftRows[fftRowIndex];
-                std::copy_n(g_plotData.begin(), FFT_SIZE, row.begin());
-                ++fftRowIndex;
-                if (fftRowIndex >= FFT_LINES)
+                for(size_t i=0; i<g_plotData.size(); ++i)
                 {
-                    fftRowIndex = 0;
+                    auto& row = fftRows[fftRowIndex];
+                    std::copy_n(g_plotData[i].begin(), FFT_SIZE, row.begin());
+                    ++fftRowIndex;
+                    if (fftRowIndex >= FFT_LINES)
+                    {
+                        fftRowIndex = 0;
+                    }
                 }
+
+                g_plotData.resize(0);
+
                 g_newData.store(false);
+                rowsChanged = true;
             }
         }
 
@@ -134,27 +151,37 @@ void guiThreadFunc()
             {
 
 
-                // Build contiguous buffer
-                std::vector<double> heatmap;
-                heatmap.resize(fftRows.size() * FFT_SIZE);
+                // if(rowsChanged)
+                // {
+                //     // Build contiguous buffer
+                //     heatmap.resize(fftRows.size() * FFT_SIZE);
 
-                for (size_t row = 0; row < fftRows.size(); row++) {
-                    for (int col = 0; col < FFT_SIZE; col++) {
-                        heatmap[row * FFT_SIZE + col] = fftRows[row][col];
-                    }
-                }
+                //     for (size_t row = 0; row < fftRows.size(); row++) {
+                //         // for (int col = 0; col < FFT_SIZE; col++) {
+                //         //     heatmap[row * FFT_SIZE + col] = fftRows[row][col];
+                //         // }
+                //         std::copy_n(
+                //             fftRows[row].begin(),
+                //             FFT_SIZE,
+                //             heatmap.begin() + row * FFT_SIZE
+                //         );
+                //     }
+
+                //     rowsChanged = false;
+                // }
+
 
                 ImPlotSpec spec{};
                 ImPlot::PushColormap(customRGBMap);
                 ImPlot::PlotHeatmap(
                     "FFT",
-                    heatmap.data(),
+                    reinterpret_cast<const double*>(fftRows.data()),
                     FFT_LINES,
                     (int)FFT_SIZE,
                     0.0f,
                     1.0f,
                     nullptr,
-                    ImPlotPoint(0, 0),
+                    ImPlotPoint(FREQ_FFT_MIN, 0),
                     ImPlotPoint(FREQ_FFT_MAX, FFT_LINES)
                 );
 
@@ -175,8 +202,9 @@ void guiThreadFunc()
     ImGui::Shutdown();
     ImPlot::DestroyContext(pctx);
     ImGui::DestroyContext(gctx);
-
+    
     g_running.store(false);
+    packedQueue.notifyWaiters();
 }
 
 void unpack3to12(const uint8_t *in, size_t byte_count, uint16_t *out)
@@ -205,6 +233,8 @@ std::condition_variable cvIncomingSamples;
 uint16_t currentSamples[ADC_BUFFER_HALF_SIZE_SAMPLES] = {0};
 std::atomic<bool> newSamples(false);
 
+
+
 void comReaderThreadFunc()
 {
     CDCReaderWindows reader("COM8");
@@ -224,7 +254,7 @@ void comReaderThreadFunc()
             {
                 // wait for magic start
                 memmove(magicBeginBuffer, magicBeginBuffer+1, sizeof(MAGIC_BEGIN) - 1);
-                reader.readBytes(magicBeginBuffer + sizeof(MAGIC_BEGIN) - 1, 1);
+                reader.readBytesExact(magicBeginBuffer + sizeof(MAGIC_BEGIN) - 1, 1);
                 ++magicRead;
                 if(memcmp(magicBeginBuffer, MAGIC_BEGIN, sizeof(MAGIC_BEGIN)) == 0) {
                     started = true;
@@ -240,7 +270,7 @@ void comReaderThreadFunc()
         }
         else 
         {
-            reader.readBytes(magicBeginBuffer, sizeof(MAGIC_BEGIN));
+            reader.readBytesExact(magicBeginBuffer, sizeof(MAGIC_BEGIN));
             if (memcmp(magicBeginBuffer, MAGIC_BEGIN, sizeof(MAGIC_BEGIN)) != 0)
             {
                 std::cout << "Desynced! Re-scanning...\n";
@@ -260,24 +290,55 @@ void comReaderThreadFunc()
         magicRead = 0;
         memset(magicBeginBuffer, 0, sizeof(MAGIC_BEGIN));
         // drain the unused data len header
-        reader.readBytes(internalBuffer, 4);
+        reader.readBytesExact(internalBuffer, 4);
         // raw data, collapsed to 2 shorts in 3 bytes
-        reader.readBytes(internalBuffer, ADC_PACKED_CHUNK_LEN);
+        reader.readBytesExact(internalBuffer, ADC_PACKED_CHUNK_LEN);
 
         // check if final magic is correct
-        reader.readBytes(magicEndBuffer, sizeof(MAGIC_END));
+        reader.readBytesExact(magicEndBuffer, sizeof(MAGIC_END));
         if(memcmp(magicEndBuffer, MAGIC_END, sizeof(MAGIC_END)) != 0) {
             std::cout << "Corrupted buffer, final magic does not fit!\n";
             continue;
         }
         {
-            std::lock_guard<std::mutex> lock(lockIncomingSamples);
-            if(newSamples.load())
+            packedQueue.pushNextWaitSpace([internalBuffer](auto* val){
+                memcpy(val, internalBuffer, ADC_PACKED_CHUNK_LEN);
+            }, g_running);
+        }
+    }
+    packedQueue.notifyWaiters();
+}
+
+void unpackerThread()
+{
+    uint8_t packedBuffer[ADC_PACKED_CHUNK_LEN];
+    while(g_running.load())
+    {
+        bool gotSample = false;
+        {
+            auto lock = packedQueue.waitSize(1, g_running);
+            if(packedQueue.sizeUnlocked() > 0)
             {
-                std::cout << "WARNING: FFT sampler cannot keep up with data!\n";
+                memcpy(packedBuffer, packedQueue.atUnlocked(0), ADC_PACKED_CHUNK_LEN);
+                packedQueue.popOldestUnlocked();
+                gotSample = true;
+                if(packedQueue.sizeUnlocked() > 5)
+                {
+                    std::cout << "WARNING: Unpacker cannot keep up with data!\n";
+                }
             }
-            unpack3to12(internalBuffer, ADC_PACKED_CHUNK_LEN, currentSamples);
-            newSamples.store(true);
+        }
+        if(gotSample)
+        {
+            {
+                std::lock_guard<std::mutex> lock(lockIncomingSamples);
+                if(newSamples.load())
+                {
+                    std::cout << "WARNING: Waveform computer cannot keep up with data!\n";
+                }
+                unpack3to12(packedBuffer, ADC_PACKED_CHUNK_LEN, currentSamples);
+                newSamples.store(true);
+            }
             cvIncomingSamples.notify_all();
         }
     }
@@ -287,7 +348,6 @@ void comReaderThreadFunc()
 std::mutex mutexWaveform;
 std::condition_variable cvWaveform;
 std::vector<double> waveform;
-std::atomic<size_t> waveformSize{0};
 
 void waveformConsumerThread()
 {
@@ -312,12 +372,17 @@ void waveformConsumerThread()
         if(gotNewSample && g_running.load()) 
         {
             std::lock_guard lockWave{mutexWaveform};
-
-            waveform.reserve(waveform.size() + ADC_BUFFER_HALF_SIZE_SAMPLES);
-            waveformSize.store(waveform.size() + ADC_BUFFER_HALF_SIZE_SAMPLES);
+            const size_t start = waveform.size();
+            waveform.resize(waveform.size() + ADC_BUFFER_HALF_SIZE_SAMPLES);
             for(size_t i=0; i<ADC_BUFFER_HALF_SIZE_SAMPLES; ++i)
             {
-                waveform.push_back(((double)(currentSamplesCopy[i]*2))/sampleMaxDouble - 1.0);
+                waveform[i+start] = ((double)(currentSamplesCopy[i]*2))/sampleMaxDouble - 1.0;
+            }
+
+            if(waveform.size() > 100000)
+            {
+                std::cout << "WARNING: Too much waveform samples, FFT is slow!\n";
+                waveform.erase(waveform.begin(), waveform.begin() + FFT_BATCH_SIZE/2);
             }
             
             gotNewSample = false;
@@ -327,53 +392,139 @@ void waveformConsumerThread()
     cvWaveform.notify_all();
 }
 
+template <typename TValue, size_t VSize>
+void addArray(const std::array<TValue, VSize>& from, std::array<TValue, VSize>& to, const bool substract = false)
+{
+    for(size_t i=0; i<VSize; ++i)
+    {
+        to[i] += substract ? -1*from[i] : from[i];
+    }
+}
+
+template <typename TValue, size_t VSize>
+void divideArray(std::array<TValue, VSize>& tgt, double divider)
+{
+    for(size_t i=0; i<VSize; ++i)
+    {
+        tgt[i] = tgt[i] / divider;
+    }
+}
+
+template <typename TValue, size_t VSize>
+void divideArrayTo(const std::array<TValue, VSize>& from, std::array<TValue, VSize>& to, double divider)
+{
+    for(size_t i=0; i<VSize; ++i)
+    {
+        to[i] = from[i] / divider;
+    }
+}
+
+constexpr size_t numAverage = 9;
+FixedCircularQueue<std::array<double, FFT_SIZE>, numAverage+1> fftQueue;
+void fftAveragerThread()
+{
+    std::array<double, FFT_SIZE> average = {0.0};
+    std::array<double, FFT_SIZE> dividedAverage = {0.0};
+    constexpr int guiFrameSkip = 13;
+    while(g_running.load())
+    {
+        {
+            const auto lock = fftQueue.waitNext(g_running);
+            if(numAverage > 1)
+            {
+                addArray(fftQueue.headUnlocked(), average);
+                bool wasFull = false;
+                if(fftQueue.isFullUnlocked())
+                {
+                    addArray(fftQueue.atUnlocked(0), average, true);
+                    wasFull = true;
+                    fftQueue.popOldestUnlocked();
+                }
+                // skip 1/2 of fft samples to reduce framerate
+                if(fftQueue.start % guiFrameSkip != 0 || !wasFull)
+                {
+                    continue;
+                }
+            }
+            else
+            {   if(fftQueue.sizeUnlocked() > 0 && fftQueue.start % guiFrameSkip == 0)
+                {
+                    std::copy_n(fftQueue.headUnlocked().data(), FFT_SIZE, dividedAverage.data());
+                }
+                
+                fftQueue.popOldestUnlocked();
+                if(fftQueue.start % guiFrameSkip != 0)
+                {
+                    continue;
+                }
+            }
+        }
+        if(numAverage > 1)
+        {
+            divideArrayTo(average, dividedAverage, (double)numAverage);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(lockFFTData);
+            g_plotData.push_back(dividedAverage);
+
+            if(g_plotData.size() > 10)
+            {
+                std::cout << "WARNING: gui can't keep up with FFT samples!\n";
+            }
+            g_newData.store(true);
+        }
+        cvNewFFTData.notify_all();
+    }
+    cvNewFFTData.notify_all();
+}
 
 int main(int argc, const char** argv)
 {
+    waveform.reserve(50000);
+
     std::thread guiThread(guiThreadFunc);
     std::thread nucleoThread(comReaderThreadFunc);
+    std::thread unpackThread(unpackerThread);
     std::thread waveformThread(waveformConsumerThread);
+    std::thread fftAvgThread(fftAveragerThread);
     // Later: reader thread will push data and notify
     // For now, simulate notifications
     std::vector<double> curWaveform;
-    curWaveform.reserve(10000);
+    curWaveform.reserve(FFT_BATCH_SIZE);
+    size_t waveformOffset = 0;
+    std::array<double, FFT_SIZE> fftBuffer = {0};
+    std::vector<std::complex<double>> fftInternalBuffer;
     while(true)
     {
-        // 1) Genrate mock waveform (time-domain)
-        // std::vector<double> samples(2*4096);
-        // std::vector<FakeTone> tones = {
-        //      {440.0, 0.8},  // A4
-        //      {1200.0, 0.4}, // mid tone
-        //      {5000.0, 0.2}, // high tone
-        //      {9000.0, 0.1, 1600_Hz}  // very high tone
-        // };
-        // generateMockSignal(samples, FREQ_SAMPLE, tones);   // fs = 48 kHz
-
-        // convert samples to +- 1
-        // constexpr uint16_t sampleMax = 0xFFF;
-        // constexpr double sampleMaxDouble = (double)sampleMax;
-        // waveform.reserve(waveform.size() + ADC_BUFFER_HALF_SIZE_SAMPLES);
-        // {
-        //     std::unique_lock lock(lockIncomingSamples);
-        //     cvIncomingSamples.wait(lock, [](){return newSamples.load() || !g_running.load();});
-        //     if(newSamples.load()) {
-        //         newSamples.store(false);
-        //         for(size_t i=0; i<ADC_BUFFER_HALF_SIZE_SAMPLES; ++i)
-        //         {
-        //             waveform.push_back(((double)(currentSamples[i]*2))/sampleMaxDouble - 1.0);
-        //         }
-        //         memset(currentSamples, 0, ADC_BUFFER_HALF_SIZE_BYTES);
-        //     }
-        // }
-        
         {
             std::unique_lock lockWave{mutexWaveform};
-            cvWaveform.wait(lockWave, [](){return waveformSize.load() >= 10000 || !g_running.load();});
-            if(waveform.size() >= 10000)
+            cvWaveform.wait(lockWave, [&waveformOffset](){ 
+                return waveform.size() < waveformOffset || waveform.size() - waveformOffset >= FFT_BATCH_SIZE || !g_running.load(); 
+            });
+            if(waveformOffset >= waveform.size())
             {
-                curWaveform.insert(curWaveform.begin(), waveform.begin(), waveform.begin()+10000);
-                waveform.erase(waveform.begin(), waveform.begin() + 5000);
-                waveformSize.store(waveform.size());
+                waveformOffset = 0;
+            }
+            if(waveform.size() - waveformOffset >= FFT_BATCH_SIZE)
+            {
+                curWaveform.insert(curWaveform.begin(), waveform.begin() + waveformOffset, waveform.begin()+FFT_BATCH_SIZE + waveformOffset);
+                // waveform.erase(waveform.begin(), waveform.begin() + 5000);
+                waveformOffset += FFT_BATCH_SIZE/2;
+                if(waveformOffset > (FFT_BATCH_SIZE*3))
+                {
+                    if(waveform.size() - waveformOffset > FFT_BATCH_SIZE*2)
+                    {
+                        std::cout << "WARNING: FFT calculator had to drop samples!\n";
+                        waveform.erase(waveform.begin(), waveform.begin() + FFT_BATCH_SIZE/2);
+                    }
+                    else
+                    {
+                        waveform.erase(waveform.begin(), waveform.begin() + waveformOffset);
+                    }
+                    
+                    waveformOffset = 0;
+                }
             }
         }
 
@@ -381,33 +532,39 @@ int main(int argc, const char** argv)
             break;
         }
 
-        if(curWaveform.size() >= 10000)
+        if(curWaveform.size() >= FFT_BATCH_SIZE)
         {
-            {
-                std::lock_guard<std::mutex> lock(lockFFTData);
-                g_plotData = computeSpectrum(
-                    curWaveform,
-                    500_kHz,     // sampling rate
-                    0.0,         // fmin
-                    FREQ_FFT_MAX,     // fmax
-                    FFT_SIZE         // output buckets
-                );
-                g_newData.store(true);
-                cvNewFFTData.notify_one();
-            }
-            curWaveform.resize(0);
-        }            
+            computeSpectrumFaster(
+                curWaveform,
+                fftInternalBuffer,
+                500_kHz,     // sampling rate
+                FREQ_FFT_MIN,         // fmin
+                FREQ_FFT_MAX,     // fmax
+                fftBuffer
+            );
 
+            fftQueue.pushNextWaitSpace([fftBuffer](std::array<double, FFT_SIZE>* value){
+                std::copy_n(fftBuffer.data(), FFT_SIZE, value->data());
+            }, g_running);
+
+            curWaveform.resize(0);
+        }
 
         if(!g_running.load()) {
+            fftQueue.notifyWaiters();
             break;
         }
     }
-
     g_running.store(false);
+
+    packedQueue.notifyWaiters();
+    fftQueue.notifyWaiters();
+    
     cvNewFFTData.notify_one();
     nucleoThread.join();
     waveformThread.join();
+    fftAvgThread.join();
+    unpackThread.join();
 
     guiThread.join();
     return 0;

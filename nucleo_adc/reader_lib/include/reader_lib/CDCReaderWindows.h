@@ -10,6 +10,7 @@ class CDCReaderWindows : public std::streambuf
     ~CDCReaderWindows() override;
 
     size_t readBytes(uint8_t* dst, size_t len);
+    bool readBytesExact(uint8_t* dst, size_t len);
 
     size_t writeBytes(const uint8_t* rc, size_t len);
 
