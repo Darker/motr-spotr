@@ -2,6 +2,8 @@
 #include "imgui/backends/imgui_impl_glfw.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <thread>
 #include <mutex>
@@ -10,9 +12,11 @@
 #include <atomic>
 #include <array>
 #include <iostream>
+#include <fstream>
 
 #include <implot/implot.h>
 #include <nucleo_shared/adc_stream_constants.h>
+#include <nucleo_shared/byte_stuff.h>
 #include <reader_lib/CDCReaderWindows.h>
 
 #include <GLFW/glfw3.h>
@@ -72,6 +76,13 @@ GLFWwindow* CreateGuiWindow(int width, int height, const char* title)
     return window;
 }
 
+static uint64_t nowMs()
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(
+        system_clock::now().time_since_epoch()
+    ).count();
+}
 
 void guiThreadFunc()
 {
@@ -108,13 +119,17 @@ void guiThreadFunc()
         return g_newData.load() || glfwWindowShouldClose(window) || !g_running.load();
     };
 
+    constexpr int RENDER_SKIP = 5;
+
 
     while (!glfwWindowShouldClose(window) && g_running.load())
     {
+        rowsChanged = false;
+        
         {
             std::unique_lock<std::mutex> lock(lockFFTData);
             // Wait up to 5 ms for new FFT data
-            cvNewFFTData.wait_for(lock, std::chrono::milliseconds(2), predNewDataCv);
+            cvNewFFTData.wait_for(lock, std::chrono::milliseconds(5), predNewDataCv);
 
             if(g_plotData.size() > 0)
             {
@@ -137,6 +152,10 @@ void guiThreadFunc()
         }
 
         glfwPollEvents();
+        if(!rowsChanged)
+        {
+            continue;
+        }
 
         ImGui_ImplGlfw_NewFrame();
         ImGui_ImplOpenGL3_NewFrame();
@@ -149,28 +168,6 @@ void guiThreadFunc()
                 ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText |
                 ImPlotFlags_NoFrame | ImPlotFlags_NoMenus))
             {
-
-
-                // if(rowsChanged)
-                // {
-                //     // Build contiguous buffer
-                //     heatmap.resize(fftRows.size() * FFT_SIZE);
-
-                //     for (size_t row = 0; row < fftRows.size(); row++) {
-                //         // for (int col = 0; col < FFT_SIZE; col++) {
-                //         //     heatmap[row * FFT_SIZE + col] = fftRows[row][col];
-                //         // }
-                //         std::copy_n(
-                //             fftRows[row].begin(),
-                //             FFT_SIZE,
-                //             heatmap.begin() + row * FFT_SIZE
-                //         );
-                //     }
-
-                //     rowsChanged = false;
-                // }
-
-
                 ImPlotSpec spec{};
                 ImPlot::PushColormap(customRGBMap);
                 ImPlot::PlotHeatmap(
@@ -345,6 +342,96 @@ void unpackerThread()
     cvIncomingSamples.notify_all();
 }
 
+struct FFTSample
+{
+    uint64_t timestampMs;
+    std::array<double, FFT_SIZE> data;
+};
+
+FixedCircularQueue<FFTSample, 32> saveQueue;
+void recordingThreadFn()
+{
+    std::ofstream out("output.bin", std::ios::binary);
+    if (!out) {
+        std::cout << "Failed to open recording file!\n";
+        g_running = false;
+        return;
+    }
+
+    // Temporary buffer for endian‑swapped doubles
+    std::array<uint64_t, FFT_SIZE> be;
+
+    uint64_t fftSize = FFT_SIZE;
+
+
+    #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        constexpr bool littleEndian = true;
+    #else
+        constexpr bool littleEndian = false;
+    #endif
+
+    if constexpr (littleEndian)
+    {
+        fftSize = bswap64(fftSize);
+    }
+
+    out.write(reinterpret_cast<const char*>(&fftSize), sizeof(fftSize));
+
+    while (g_running.load())
+    {
+        // ---- 1) Wait for next sample (this is the ONLY lock) ----
+        FFTSample sample;
+        {
+            auto l = saveQueue.waitSize(1, g_running);
+            if (!g_running.load())
+                break;
+            const auto size = saveQueue.sizeUnlocked();
+            if(size > 0)
+            {
+                if(size > 20)
+                {
+                    std::cout << "WARNING: save queue getting full " << size << "/" << 32 << "\n";
+                }
+                sample = saveQueue.atUnlocked(0);
+                saveQueue.popOldestUnlocked();
+            }
+            else {
+                continue;
+            }
+        }
+
+        // ---- 2) Write timestamp (big‑endian uint64_t) ----
+        uint64_t ts = sample.timestampMs;
+        // std::cout << "TS: " << bswap64(bswap64(ts)) << "\n";
+        if constexpr (littleEndian)
+        {
+            ts = bswap64(ts);
+        }
+
+        out.write(reinterpret_cast<const char*>(&ts), sizeof(ts));
+
+        // ---- 3) Convert all doubles to big‑endian uint64_t ----
+        for (size_t i = 0; i < FFT_SIZE; i++)
+        {
+            uint64_t bits;
+            static_assert(sizeof(bits) == sizeof(sample.data[i]));
+            std::memcpy(&bits, &sample.data[i], sizeof(bits));
+
+            if constexpr (littleEndian)
+            {
+                bits = bswap64(bits);
+            }
+
+            be[i] = bits;
+        }
+
+        // ---- 4) Write entire FFT row in one go ----
+        out.write(reinterpret_cast<const char*>(be.data()),
+                  be.size() * sizeof(uint64_t));
+    }
+}
+
+
 std::mutex mutexWaveform;
 std::condition_variable cvWaveform;
 std::vector<double> waveform;
@@ -419,6 +506,7 @@ void divideArrayTo(const std::array<TValue, VSize>& from, std::array<TValue, VSi
     }
 }
 
+
 constexpr size_t numAverage = 9;
 FixedCircularQueue<std::array<double, FFT_SIZE>, numAverage+1> fftQueue;
 void fftAveragerThread()
@@ -426,6 +514,7 @@ void fftAveragerThread()
     std::array<double, FFT_SIZE> average = {0.0};
     std::array<double, FFT_SIZE> dividedAverage = {0.0};
     constexpr int guiFrameSkip = 13;
+    constexpr int recordingFrameSkip = 17;
     while(g_running.load())
     {
         {
@@ -440,8 +529,8 @@ void fftAveragerThread()
                     wasFull = true;
                     fftQueue.popOldestUnlocked();
                 }
-                // skip 1/2 of fft samples to reduce framerate
-                if(fftQueue.start % guiFrameSkip != 0 || !wasFull)
+
+                if(!wasFull)
                 {
                     continue;
                 }
@@ -453,30 +542,56 @@ void fftAveragerThread()
                 }
                 
                 fftQueue.popOldestUnlocked();
-                if(fftQueue.start % guiFrameSkip != 0)
-                {
-                    continue;
-                }
+                // if(fftQueue.start % guiFrameSkip != 0)
+                // {
+                //     continue;
+                // }
             }
+        }
+        const bool doGui = fftQueue.start % guiFrameSkip == 0;
+        const bool doStore = fftQueue.start % recordingFrameSkip == 0;
+
+        if(!doGui && !doStore)
+        {
+            continue;
         }
         if(numAverage > 1)
         {
             divideArrayTo(average, dividedAverage, (double)numAverage);
         }
 
+        bool shouldNotifyGui = false;
+        if(doGui)
         {
             std::lock_guard<std::mutex> lock(lockFFTData);
             g_plotData.push_back(dividedAverage);
 
-            if(g_plotData.size() > 10)
+            if(g_plotData.size() > 12)
             {
                 std::cout << "WARNING: gui can't keep up with FFT samples!\n";
             }
-            g_newData.store(true);
+            if(g_plotData.size() > 7)
+            {
+                g_newData.store(true);
+                shouldNotifyGui = true;
+            }
         }
-        cvNewFFTData.notify_all();
+        if(shouldNotifyGui)
+        {
+            cvNewFFTData.notify_all();
+        }
+
+        if(doStore)
+        {
+            const auto curTimestamp = nowMs();
+            saveQueue.pushNextWaitSpace([&dividedAverage, curTimestamp](auto data) {
+                std::copy_n(dividedAverage.data(), FFT_SIZE, data->data.data());
+                data->timestampMs = curTimestamp;
+            }, g_running);
+        }
     }
     cvNewFFTData.notify_all();
+    saveQueue.notifyWaiters();
 }
 
 int main(int argc, const char** argv)
@@ -488,6 +603,7 @@ int main(int argc, const char** argv)
     std::thread unpackThread(unpackerThread);
     std::thread waveformThread(waveformConsumerThread);
     std::thread fftAvgThread(fftAveragerThread);
+    std::thread recordingThread(recordingThreadFn);
     // Later: reader thread will push data and notify
     // For now, simulate notifications
     std::vector<double> curWaveform;
@@ -552,6 +668,7 @@ int main(int argc, const char** argv)
 
         if(!g_running.load()) {
             fftQueue.notifyWaiters();
+            saveQueue.notifyWaiters();
             break;
         }
     }
@@ -565,6 +682,7 @@ int main(int argc, const char** argv)
     waveformThread.join();
     fftAvgThread.join();
     unpackThread.join();
+    recordingThread.join();
 
     guiThread.join();
     return 0;

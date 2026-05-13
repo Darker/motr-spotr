@@ -1,4 +1,5 @@
 #pragma once
+
 #include <stdint.h>
 
 #include <stddef.h>
@@ -8,12 +9,19 @@ struct SimpleQueue
 {
     size_t start = 0;
     size_t end   = 0;
+    bool empty = false;
 
     TValue values[VSize];
 
     size_t size() const
     {
-        return (end + VSize - start) % VSize;
+        if (empty)
+            return 0;
+
+        if (end >= start)
+            return end - start + 1;
+
+        return (VSize - start) + (end + 1);
     }
 
     bool isFull() const
@@ -23,7 +31,7 @@ struct SimpleQueue
 
     bool isEmpty() const
     {
-        return start == end;
+        return empty;
     }
 
     void pushNextFn(void (*writer)(TValue*))
@@ -49,11 +57,18 @@ struct SimpleQueue
         return true;
     }
 
-    void popOldest()
+    void popOldestUnlocked()
     {
-        if (!isEmpty())
+        if (!empty)
         {
-            start = (start + 1) % VSize;
+            if(start == end)
+            {
+                empty = true;
+            }
+            else 
+            {
+                start = (start + 1) % VSize;
+            }
         }
     }
 
@@ -61,6 +76,7 @@ struct SimpleQueue
     {
         start = 0;
         end   = 0;
+        empty = true;
     }
 
     TValue& head()

@@ -92,10 +92,6 @@ static bool pushBufferToQueue(const uint16_t* data, size_t dataLen, bool mock = 
     chunk->state = UsbState::PENDING;
     writeToQueue(data, dataLen, chunk->data);
     return true;
-    // // *** SEND ***
-    // uint8_t result = CDC_Transmit_FS(curBuffer, total_len);
-
-    // return (result == USBD_OK);
 }
 
 static void sendFromQueue()

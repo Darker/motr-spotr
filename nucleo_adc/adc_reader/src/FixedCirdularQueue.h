@@ -5,10 +5,17 @@
 template <typename TValue, size_t VSize>
 struct FixedCircularQueue 
 {
+    constexpr static size_t MAX_SIZE = VSize;
 
     size_t sizeUnlocked() const
     {
-        return (end + VSize - start) % VSize;
+        if (empty)
+            return 0;
+
+        if (end >= start)
+            return end - start + 1;
+
+        return (VSize - start) + (end + 1);
     }
 
     bool isFullUnlocked() const
@@ -48,13 +55,22 @@ struct FixedCircularQueue
         if (sizeUnlocked() == 0)
             return;
 
-        start = (start + 1) % VSize;
+        if(start == end)
+        {
+            empty = true;
+        }
+        else 
+        {
+            start = (start + 1) % VSize;
+        }
+        
         removalDataCv.notify_all();
     }
 
     void clearUnlocked()
     {
         start = end = 0;
+        empty = true;
         removalDataCv.notify_all();
     }
 
@@ -128,6 +144,7 @@ struct FixedCircularQueue
     }
     size_t start = 0;
     size_t end = 0;
+    bool empty = true;
     // monotonic counter for detecting that an item was added
     size_t itemCounter = 0;
 
@@ -140,6 +157,12 @@ protected:
 
     void moveIndices()
     {
+        if(empty)
+        {
+            empty = false;
+            ++itemCounter;
+            return;
+        }
         end += 1;
         if(end >= VSize)
         {
