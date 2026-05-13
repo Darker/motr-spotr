@@ -4,4 +4,10 @@
     "clangd.arguments": [
         "--compile-commands-dir=${command:cmake.buildDirectory}"
     ],
+    "cmake.debugConfig": {
+        "args": [
+            "--fftFile=${workspaceFolder}/recording.bin",
+            //"--no-gui"
+        ]
+    }
 }

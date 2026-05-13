@@ -7,8 +7,9 @@ NEURAL_ROOT = Path(__file__).parent
 PROJECT_ROOT = Path(__file__).parent.parent
 
 DATA_ROOT = NEURAL_ROOT / "data"
-DATA_RECORD_TRN = DATA_ROOT / "recordings/private/train"
-DATA_RECORD_VAL = DATA_ROOT / "recordings/private/val"
+DATA_RECORD =  DATA_ROOT / "recordings"
+DATA_RECORD_TRN = DATA_RECORD / "private/train"
+DATA_RECORD_VAL = DATA_RECORD / "private/val"
 
 CURRENT_WEIGHTS_DIR = DATA_ROOT / "weights"
 STABLE_WEIGHTS_DIR = DATA_ROOT / "weights_stable"

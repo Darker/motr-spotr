@@ -1,11 +1,14 @@
 
 
+import torch
+
 from neural.dataset.binary_reading import FFTDataFile, fft_samples_to_image_cv, read_fft_file
 import cv2
 import time
 import json
 
-from neural.neural_constants import DATA_RECORD_TRN, DATA_RECORD_VAL, DATA_ROOT
+from neural.models.fft_classifier import FFTClassifier
+from neural.neural_constants import CURRENT_WEIGHTS_DIR, DATA_RECORD, DATA_RECORD_TRN, DATA_RECORD_VAL, DATA_ROOT, SIGNAL_CLASSES
 
 from datetime import datetime
 import numpy as np
@@ -39,27 +42,12 @@ def apply_interval_markers(colored_img, samples, intervals):
 
 if __name__ == "__main__":
 
-    SAMPLE_PATH = DATA_RECORD_VAL / "val_test.bin"
+    SAMPLE_PATH = DATA_RECORD / "current.bin"
     JSON_PATH = SAMPLE_PATH.with_suffix(".json")
 
-    fft_size, samples = read_fft_file(SAMPLE_PATH)
-    print(f"Num samples: {len(samples)}")
-    print(f"FFT sample size: {fft_size}")
-    print(time.gmtime(samples[0][0]/1000))
-    print(time.gmtime(samples[len(samples)-1][0]/1000))
 
     with open(JSON_PATH, "r") as f:
         sample_info: FFTLabels = json.load(f)
-    intervals = load_intervals(sample_info)
-    print(intervals[0][0])
-    print(time.gmtime(intervals[0][0]/1000))
-    
-    image = fft_samples_to_image_cv(samples)
-    colored = cv2.applyColorMap(image, cv2.COLORMAP_INFERNO)
-
-    apply_interval_markers(colored, samples, intervals)
-
-    cv2.imwrite("fft_color_val.png", colored)
 
     fft_file = FFTDataFile(SAMPLE_PATH)
     print(f"Num samples: {len(fft_file)}")
@@ -76,10 +64,39 @@ if __name__ == "__main__":
 
     h, w, _ = colored.shape
     marker_width = 16
+    fft_window_size = 8
 
-    for row_idx, data in enumerate(fft_file):
-        is_active = "aku-bosh" in index[data.timestamp]
+    model = FFTClassifier(fft_window_size, fft_file.fft_size, SIGNAL_CLASSES)
+    model.load_weights(CURRENT_WEIGHTS_DIR)
+    model.eval()
+
+
+    input = torch.zeros((1, fft_window_size, fft_file.fft_size))
+
+    bosh_idx = SIGNAL_CLASSES.index("aku-bosh")
+
+    for row_idx, fft_data in enumerate(fft_file):
+        is_active = "aku-bosh" in index[fft_data.timestamp]
         color = (255, 255, 255) if is_active else (0, 0, 0)
         colored[row_idx, w - marker_width : w] = color
-    
-    cv2.imwrite("fft_color_val_v2.png", colored)
+        # pred without batch is [N_CLASSES]
+        
+
+        if row_idx < fft_window_size:
+            # still filling the initial window
+            input[0, row_idx] = torch.from_numpy(fft_data.fft).to(torch.float32)
+        else:
+            model_pred = model(input).squeeze(0).cpu().detach()
+            model_pred_prob = torch.sigmoid(model_pred)
+            pred_bosh = model_pred_prob[bosh_idx].item()
+            #  print(model_pred_prob)
+            color_model = (0, 64*pred_bosh, 254*pred_bosh)
+            colored[row_idx - fft_window_size//2, w - marker_width*2 : w-marker_width] = color_model
+
+            # shift window left by 1
+            input[0, :-1] = input[0, 1:].clone()
+
+            # append newest FFT at the end
+            input[0, -1] = torch.from_numpy(fft_data.fft).to(torch.float32)
+
+    cv2.imwrite("fft_color.png", colored)

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -18,6 +19,7 @@
 #include <nucleo_shared/adc_stream_constants.h>
 #include <nucleo_shared/byte_stuff.h>
 #include <reader_lib/CDCReaderWindows.h>
+#include <args/args.h>
 
 #include <GLFW/glfw3.h>
 
@@ -39,6 +41,8 @@ std::vector<std::array<double, FFT_SIZE>> g_plotData;
 
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_newData{false};
+
+std::atomic<bool> guiAllowed{false};
 
 FixedCircularQueue<uint8_t[ADC_PACKED_CHUNK_LEN], 10> packedQueue;
 
@@ -86,7 +90,11 @@ static uint64_t nowMs()
 
 void guiThreadFunc()
 {
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if(!guiAllowed.load())
+    {
+        return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
     ImGuiContext* gctx = ImGui::CreateContext();
     ImPlotContext* pctx = ImPlot::CreateContext();
 
@@ -349,11 +357,12 @@ struct FFTSample
 };
 
 FixedCircularQueue<FFTSample, 32> saveQueue;
-void recordingThreadFn()
+void recordingThreadFn(std::filesystem::path saveFileName)
 {
-    std::ofstream out("output.bin", std::ios::binary);
+    std::ofstream out(saveFileName, std::ios::binary);
     if (!out) {
         std::cout << "Failed to open recording file!\n";
+        std::cout << "Path read: " << saveFileName << "\n";
         g_running = false;
         return;
     }
@@ -515,6 +524,8 @@ void fftAveragerThread()
     std::array<double, FFT_SIZE> dividedAverage = {0.0};
     constexpr int guiFrameSkip = 13;
     constexpr int recordingFrameSkip = 17;
+    const bool doGuiEver = guiAllowed.load();
+
     while(g_running.load())
     {
         {
@@ -548,7 +559,7 @@ void fftAveragerThread()
                 // }
             }
         }
-        const bool doGui = fftQueue.start % guiFrameSkip == 0;
+        const bool doGui = fftQueue.start % guiFrameSkip == 0 && doGuiEver;
         const bool doStore = fftQueue.start % recordingFrameSkip == 0;
 
         if(!doGui && !doStore)
@@ -596,6 +607,50 @@ void fftAveragerThread()
 
 int main(int argc, const char** argv)
 {
+    args::ArgumentParser parser("FFT renderer and recorder");
+    args::HelpFlag help(parser, "HELP", "Show this help menu.", {'h', "help"});
+    args::ValueFlag<std::string> saveFileFlag(
+        parser,
+         "SAVE_FILE", 
+         "Where to store the FFTs", {"fftFile"},
+         args::Options::Required | args::Options::Single
+    );
+    args::Flag noGuiFlag(parser, "NO_GUI", "Disable GUI", {"no-gui"});
+
+    try
+    {
+        parser.ParseCLI(argc, argv);
+    }
+    catch (const args::Completion& e)
+    {
+        std::cout << e.what();
+        return 0;
+    }
+    catch (const args::Help&)
+    {
+        std::cout << parser;
+        return 0;
+    }
+    catch (const args::ParseError& e)
+    {
+        std::cerr << e.what() << std::endl;
+        std::cerr << parser;
+        return 1;
+    }
+    catch (const args::ValidationError& e)
+    {
+        std::cerr << e.what() << std::endl;
+        std::cerr << parser;
+        return 1;
+    }
+
+    if(!noGuiFlag)
+    {
+        guiAllowed.store(true);
+    }
+
+    const std::filesystem::path savePath = std::filesystem::path(args::get(saveFileFlag));
+
     waveform.reserve(50000);
 
     std::thread guiThread(guiThreadFunc);
@@ -603,9 +658,8 @@ int main(int argc, const char** argv)
     std::thread unpackThread(unpackerThread);
     std::thread waveformThread(waveformConsumerThread);
     std::thread fftAvgThread(fftAveragerThread);
-    std::thread recordingThread(recordingThreadFn);
-    // Later: reader thread will push data and notify
-    // For now, simulate notifications
+    std::thread recordingThread(recordingThreadFn, savePath);
+
     std::vector<double> curWaveform;
     curWaveform.reserve(FFT_BATCH_SIZE);
     size_t waveformOffset = 0;

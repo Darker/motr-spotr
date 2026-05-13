@@ -20,6 +20,8 @@ class TimeRange(TypedDict):
 
 class RecordingInfo(TypedDict):
     filename: str
+    start_time: str
+    end_time: str
 
 class FFTLabels(TypedDict):
     classes: dict[T_SIGNAL_CLASS, list[TimeRange]]

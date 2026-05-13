@@ -68,7 +68,7 @@ class FFTSampleDataset(CachedDataset[SampleCoords, None, FFTTensorData]):
                         subrange_is_percent=subrange_is_percent,
                         shuffle_seed=shuffle_seed)
 
-        self.FORMAT_VERSION = 2
+        self.FORMAT_VERSION = 3
 
         self.use_gpu = use_gpu
         self.torch_device = torch.device("cuda" if torch.cuda.is_available() and self.use_gpu else "cpu")
@@ -161,7 +161,7 @@ class FFTSampleDataset(CachedDataset[SampleCoords, None, FFTTensorData]):
                     class_counts[cls_idx] += 1.0
 
         classes_total_tensor = torch.zeros((len(SIGNAL_CLASSES)), dtype=torch.float32)
-        cutoff = self.window_size*0.3
+        cutoff = 0.3
 
         for cls_idx, count in enumerate(class_counts):
             frac = count / self.window_size

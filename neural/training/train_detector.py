@@ -60,8 +60,13 @@ def train_one_epoch(
         curr_loss = float(loss.detach().cpu())
         total_loss += curr_loss
 
-        if num_batches % 1 == 0:
+        if num_batches % 5 == 0:
             print(f"    Batch {num_batches: >5} Loss: {curr_loss:.5f}")
+            class_means = batch["signal_classes"].mean(dim=0)          # [NUM_CLASSES]
+
+            print("    Per-class mean probabilities:")
+            for idx, val in enumerate(class_means):
+                print(f"      class {idx} {SIGNAL_CLASSES[idx]}: {val.item():.4f}")
 
         num_batches += 1
 
@@ -120,9 +125,11 @@ def train():
         cache_folder="D:\\torch_data\\cached_fft_detect",
     )
 
+    # print("Total val samples: "+str(len(val_dataset_src)))
+
     train_loader = DataLoader(
         train_dataset_src,
-        batch_size=32,
+        batch_size=64,
         shuffle=False,
         num_workers=6,
         pin_memory=True,
@@ -169,10 +176,9 @@ def train():
     # add_nan_hooks(model)
     os.makedirs(CURRENT_WEIGHTS_DIR, exist_ok=True)
     found_anything = False
-    # found_modules, needed_modules = model.load_weights(CURRENT_WEIGHTS_CLS_DIR)
-    # found_anything = found_modules > 0
-    # found_all = found_modules == needed_modules
-    # Training loop
+    found_modules, needed_modules = model.load_weights(CURRENT_WEIGHTS_DIR)
+    found_anything = found_modules > 0
+    found_all = found_modules == needed_modules
     
     min_val_loss = 500.0
     learn_loss = 0.0
@@ -236,7 +242,7 @@ def train():
                         lr_cur = LR_DEFAULT / 2.0
                     change_lr(optimizer, lr_cur)
                 if epoch > 1 or not found_anything:
-                    #model.save_weights(CURRENT_WEIGHTS_DIR)
+                    model.save_weights(CURRENT_WEIGHTS_DIR)
                     pass
             else:
                 no_improvement_steps += 1

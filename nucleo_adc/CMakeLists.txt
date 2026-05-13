@@ -31,7 +31,7 @@ add_subdirectory("nucleo_mock")
 add_subdirectory("nucleo_main")
 add_subdirectory("tpc/imgui")
 add_subdirectory("tpc/implot")
-
+add_subdirectory("tpc/args")
 
 # -------------------------------------------------------------
 # Host build (Windows/Linux/macOS)

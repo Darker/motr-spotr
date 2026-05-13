@@ -1,13 +1,15 @@
+
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import struct
 from threading import Lock
-import time
+
 import numpy as np
 from numpy.typing import NDArray
 from numpy.dtypes import Float64DType
-import cv2
+
+import torch
 
 from neural.typing.sample_types import FFTSample
 
@@ -100,9 +102,30 @@ class FFTDataFile:
         fft = np.frombuffer(fft_bytes, dtype=self.fft_dtype, count=self.fft_size)
         return FFTSample(fft=fft.astype(np.float64, copy=False), timestamp=timestamp)
     
+    def get_timestamp_at(self, index: int):
+        offset = self.data_start + index * self.sample_size
+        with self.file_lock:
+            self.fd.seek(offset)
+
+            # Read timestamp
+            ts_bytes = self.fd.read(8)
+            timestamp: int
+            (timestamp,) = struct.unpack(">Q", ts_bytes)
+            return timestamp
+    
     def __iter__(self):
         for i in range(0, self.num_samples):
             yield self[i]
+
+    def make_tensor(self, offset: int, window_size: int):
+        if offset + window_size > self.num_samples:
+            raise IndexError
+        
+        all = torch.zeros((window_size, self.fft_size))
+        for i in range(offset, offset + window_size):
+            fft_data = self[i]
+            all[i-offset] = torch.from_numpy(fft_data.fft).to(torch.float32)
+        return all
 
 
 def fft_samples_to_image_cv(samples):
